@@ -1,0 +1,8 @@
+README.md
+pyproject.toml
+safety.egg-info/PKG-INFO
+safety.egg-info/SOURCES.txt
+safety.egg-info/dependency_links.txt
+safety.egg-info/requires.txt
+safety.egg-info/top_level.txt
+src/__init__.py
