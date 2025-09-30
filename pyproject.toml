@@ -6,7 +6,8 @@ dependencies = [
     "pandas",
     "scipy",
     "matplotlib",
-    "pytest"
+    "pytest",
+    "mesa"
 ]
 
 [build-system]
