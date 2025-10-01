@@ -9,30 +9,30 @@ collects all relevant data for analysis.
 """
 
 import mesa
-import numpy as np
-from typing import Dict
+from typing import Dict, Type
 
-from src.agents import RegulatorAgent, DeveloperAgent, prob_high_performance_signal, prob_good_safety_outcome
-from src.contracts import (
-    Contract,
+# Updated imports to reflect the new modular structure
+from src.agents.base_developer import BaseDeveloperAgent
+from src.agents.regulator import RegulatorAgent
+from src.simulation_utils import prob_high_performance_signal, prob_good_safety_outcome
+from src.contracts.heuristics import (
     create_naive_fine_contract,
     create_performance_contract,
-    create_hybrid_contract,
-    calculate_optimal_contract
+    create_hybrid_contract
 )
+from src.contracts.optimal import calculate_optimal_contract
 
 
 class SafetyModel(mesa.Model):
     """The main model for the AI safety regulation game."""
 
-    def __init__(self, params: dict):
+    def __init__(self, params: Dict):
         """
         Create a new SafetyModel.
 
         Args:
-            params: A dictionary of parameters for the simulation run.
-                    Expected keys: 'nu', 'theta_L', 'theta_H', 'delta_W',
-                    'contract_type', 'safety_bonus', 'performance_bonus'.
+            params: A dictionary of parameters for the simulation run. It must
+                    contain a 'developer_class' key specifying which agent to use.
         """
         super().__init__()
         self.params = params
@@ -41,16 +41,25 @@ class SafetyModel(mesa.Model):
         # --- Setup Agents and Scheduler ---
         self.schedule = mesa.time.BaseScheduler(self)
 
-        # Create the Regulator agent
+        # Create the Regulator agent (its class is fixed)
         self.regulator = RegulatorAgent(unique_id=0, model=self, contract_menu={})
         self.schedule.add(self.regulator)
 
-        # Create the Developer agent with a stochastically assigned type
+        # Determine the developer's private type stochastically
         is_high_type = self.random.random() < self.params['nu']
-        dev_type = 'H' if is_high_type else 'L'
+        dev_type_key = 'H' if is_high_type else 'L'
         theta = self.params['theta_H'] if is_high_type else self.params['theta_L']
         
-        self.developer = DeveloperAgent(unique_id=1, model=self, theta=theta)
+        # Create the Developer agent using the class provided in the parameters
+        # This makes the model flexible to handle any developer type
+        developer_class: Type[BaseDeveloperAgent] = self.params['developer_class']
+        developer_params = self.params.get('developer_params', {})
+        self.developer = developer_class(
+            unique_id=1, 
+            model=self, 
+            theta=theta, 
+            **developer_params
+        )
         self.schedule.add(self.developer)
         
         # --- Contract Selection Logic ---
@@ -58,23 +67,21 @@ class SafetyModel(mesa.Model):
         contract_type = self.params.get('contract_type', 'optimal')
         
         if contract_type == 'optimal':
-            # For the optimal contract, the agent gets the menu and chooses
-            # (or is assigned, per the Revelation Principle) the correct one.
-            self.regulator.contract_menu = calculate_optimal_contract(self.params)
-            self.developer.contract_offer = self.regulator.contract_menu[dev_type]
+            menu, _ = calculate_optimal_contract(self.params)
+            self.regulator.contract_menu = menu
+            self.developer.contract_offer = self.regulator.contract_menu[dev_type_key]
         else:
-            # For heuristic contracts, the menu is simple (both types get same contract)
             if contract_type == 'fine':
-                heuristic_contract = create_naive_fine_contract(self.params['safety_bonus'])
+                c = create_naive_fine_contract(self.params['safety_bonus'])
             elif contract_type == 'performance':
-                heuristic_contract = create_performance_contract(self.params['performance_bonus'])
+                c = create_performance_contract(self.params['performance_bonus'])
             elif contract_type == 'hybrid':
-                heuristic_contract = create_hybrid_contract(self.params['safety_bonus'], self.params['performance_bonus'])
+                c = create_hybrid_contract(self.params['safety_bonus'], self.params['performance_bonus'])
             else:
                 raise ValueError(f"Unknown contract type: {contract_type}")
             
-            self.regulator.contract_menu = {'H': heuristic_contract, 'L': heuristic_contract}
-            self.developer.contract_offer = heuristic_contract
+            self.regulator.contract_menu = {'H': c, 'L': c}
+            self.developer.contract_offer = c
 
         # --- State variables for data collection ---
         self.disaster_occurred = False
@@ -85,7 +92,6 @@ class SafetyModel(mesa.Model):
             model_reporters={
                 "DisasterOccurred": "disaster_occurred",
                 "SocialWelfare": "social_welfare",
-                "ContractType": lambda m: m.params.get('contract_type'),
             },
             agent_reporters={
                 "Theta": "theta",
@@ -94,40 +100,28 @@ class SafetyModel(mesa.Model):
                 "Payoff": "payoff"
             }
         )
-        self.datacollector.collect(self) # Collect initial state
+        # Note: Initial state is collected at the end of __init__ automatically by Mesa's batch runner
 
     def step(self):
-        """
-        Executes one round of the game.
-        """
-        # --- 1. Agent Action ---
-        # The scheduler activates the developer's step() method, where they
-        # observe their contract and choose their optimal efforts.
+        """Executes one round of the game."""
+        # 1. Agents choose their actions (only the developer has a complex step method)
         self.schedule.step()
 
-        # --- 2. Realize Outcomes ---
-        # Determine outcomes based on the developer's chosen efforts
-        e_p = self.developer.chosen_ep
-        e_s = self.developer.chosen_es
-
-        # Performance signal outcome
-        p_pi_H = prob_high_performance_signal(e_p)
-        pi_outcome = 'H' if self.random.random() < p_pi_H else 'L'
-
-        # Safety outcome
-        p_q_G = prob_good_safety_outcome(e_s)
-        q_outcome = 'G' if self.random.random() < p_q_G else 'B'
-
+        # 2. Realize outcomes based on the developer's chosen efforts
+        e_p, e_s = self.developer.chosen_ep, self.developer.chosen_es
+        pi_outcome = 'H' if self.random.random() < prob_high_performance_signal(e_p) else 'L'
+        q_outcome = 'G' if self.random.random() < prob_good_safety_outcome(e_s) else 'B'
         self.disaster_occurred = (q_outcome == 'B')
 
-        # --- 3. Calculate Payoffs ---
-        # Look up the payment from the developer's contract
+        # 3. Calculate and assign payoffs
         payment = self.developer.contract_offer[q_outcome][pi_outcome]
         self.developer.payoff = payment
 
-        # Calculate social welfare for the round
         welfare = 0 if q_outcome == 'G' else -self.params['delta_W']
         self.social_welfare = welfare - payment
 
-        # --- 4. Collect Data ---
+        # 4. Allow learning agents to update their policy
+        self.developer.learn(reward=self.developer.payoff)
+        
+        # 5. Collect data for this step
         self.datacollector.collect(self)
