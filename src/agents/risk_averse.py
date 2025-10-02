@@ -73,7 +73,7 @@ class RiskAverseDeveloperAgent(BaseDeveloperAgent):
         """
         self._choose_optimal_efforts()
 
-    def learn(self, reward: float, action_index: int = None):
+    def learn(self, reward: float):
         """
         The learning method. This agent does not learn from experience.
         """

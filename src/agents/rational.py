@@ -85,7 +85,7 @@ class RationalDeveloperAgent(BaseDeveloperAgent):
         """
         self._choose_optimal_efforts()
 
-    def learn(self, reward: float, action_index: int):
+    def learn(self, reward: float):
         """
         The learning method for the agent. The rational agent does not learn,
         so this method does nothing.

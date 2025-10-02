@@ -53,7 +53,7 @@ class BaseDeveloperAgent(mesa.Agent, ABC):
         raise NotImplementedError("Subclasses must implement the 'step' method.")
 
     @abstractmethod
-    def learn(self, reward: float, action_index: int):
+    def learn(self, reward: float):
         """
         The agent's learning method, called after a step is resolved.
 
@@ -61,6 +61,5 @@ class BaseDeveloperAgent(mesa.Agent, ABC):
         
         Args:
             reward: The payoff received from the last action.
-            action_index: The index of the action that was taken.
         """
         raise NotImplementedError("Subclasses must implement the 'learn' method.")
