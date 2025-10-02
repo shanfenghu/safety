@@ -58,7 +58,7 @@ class LearningDeveloperAgent(BaseDeveloperAgent):
         # --- Epsilon-Greedy Action Selection ---
         if self.model.random.random() < self.epsilon:
             # Explore: choose a random action
-            action_index = self.model.random.integers(len(self.action_space))
+            action_index = self.model.random.randrange(len(self.action_space))
         else:
             # Exploit: choose the best-known action, breaking ties randomly
             best_q_value = self.q_table.max()

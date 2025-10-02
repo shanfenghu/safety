@@ -7,6 +7,7 @@ Unit tests for the LearningDeveloperAgent class in src/agents/learning.py.
 import unittest
 import mesa
 import numpy as np
+import random
 
 from src.agents.learning import LearningDeveloperAgent
 from src.contracts.heuristics import create_performance_contract
@@ -16,7 +17,7 @@ class DummyModel(mesa.Model):
     """A dummy model for testing that includes a random number generator."""
     def __init__(self):
         super().__init__()
-        self.random = np.random.default_rng()
+        self.random = random.Random()
 
 class TestLearningDeveloperAgent(unittest.TestCase):
 
