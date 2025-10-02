@@ -37,6 +37,7 @@ class SafetyModel(mesa.Model):
         super().__init__()
         self.params = params
         self.running = True
+        self.correlation_k = self.params.get('correlation_k', 0.0)
 
         # --- Setup Agents and Scheduler ---
         self.schedule = mesa.time.BaseScheduler(self)
@@ -110,7 +111,9 @@ class SafetyModel(mesa.Model):
         # 2. Realize outcomes based on the developer's chosen efforts
         e_p, e_s = self.developer.chosen_ep, self.developer.chosen_es
         pi_outcome = 'H' if self.random.random() < prob_high_performance_signal(e_p) else 'L'
-        q_outcome = 'G' if self.random.random() < prob_good_safety_outcome(e_s) else 'B'
+        # q_outcome = 'G' if self.random.random() < prob_good_safety_outcome(e_s) else 'B'
+        effective_es = e_s + self.correlation_k * e_p
+        q_outcome = 'G' if self.random.random() < prob_good_safety_outcome(max(0, effective_es)) else 'B'
         self.disaster_occurred = (q_outcome == 'B')
 
         # 3. Calculate and assign payoffs
