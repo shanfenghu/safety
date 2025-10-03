@@ -184,7 +184,8 @@ def _solve_for_optimal_efforts(params: Dict) -> Dict:
         return -(expected_welfare - expected_payments)
 
     # --- Run the Outer Optimization ---
-    initial_guess = np.array([0.15, 0.10, 5.0, 4.0]) # [e_pH, e_pL, e_sH, e_sL]
+    # Use the provided initial guess if available, otherwise use a default
+    initial_guess = params.get('initial_guess', np.array([0.15, 0.10, 5.0, 4.0]))
     bounds = [(0, None), (0, None), (0, None), (0, None)]
     
     result = minimize(
@@ -194,11 +195,12 @@ def _solve_for_optimal_efforts(params: Dict) -> Dict:
         method='L-BFGS-B'
     )
     
-    e_pH_opt, e_pL_opt, e_sH_opt, e_sL_opt = result.x if result.success else (0,0,0,0)
+    e_pH_opt, e_pL_opt, e_sH_opt, e_sL_opt = result.x if result.success else initial_guess
 
     return {
         'H': {'ep': e_pH_opt, 'es': e_sH_opt},
-        'L': {'ep': e_pL_opt, 'es': e_sL_opt}
+        'L': {'ep': e_pL_opt, 'es': e_sL_opt},
+        'solver_solution': result.x # Also return the raw solution vector for the warm start
     }
 
 
