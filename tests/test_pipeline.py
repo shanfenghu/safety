@@ -1,86 +1,155 @@
 # tests/test_pipeline.py
 
 """
-Unit tests for the experiment pipeline in src/pipeline.py.
+Comprehensive unit tests for the custom experiment pipeline in src/pipeline.py.
+
+This suite is broken into multiple classes to test each component of the pipeline
+in isolation and with a wide variety of scenarios, ensuring the entire
+experimental workflow is robust and correct.
 """
 
 import unittest
-from unittest.mock import patch
 import pandas as pd
-import mesa
+from unittest.mock import patch
 
-from src.pipeline import run, _SafetyModelWrapper
+from src.pipeline import run, _expand_parameters
 from src.agents.rational import RationalDeveloperAgent
 
-class TestPipeline(unittest.TestCase):
+class TestExpandParameters(unittest.TestCase):
+    """
+    A dedicated test class for the _expand_parameters helper function.
+    """
 
+    def test_one_variable_parameter(self):
+        """Tests expansion with a single variable parameter."""
+        params = {"nu": [0.2, 0.8], "theta_L": 1.0}
+        expanded = _expand_parameters(params)
+        self.assertEqual(len(expanded), 2)
+        self.assertIn({'nu': 0.2, 'theta_L': 1.0}, expanded)
+        self.assertIn({'nu': 0.8, 'theta_L': 1.0}, expanded)
+
+    def test_multiple_variable_parameters(self):
+        """Tests expansion with a grid of two variable parameters."""
+        params = {"nu": [0.2, 0.8], "contract_type": ["fine", "hybrid"], "theta_L": 1.0}
+        expanded = _expand_parameters(params)
+        self.assertEqual(len(expanded), 4)
+        self.assertIn({'nu': 0.2, 'contract_type': 'fine', 'theta_L': 1.0}, expanded)
+        self.assertIn({'nu': 0.8, 'contract_type': 'hybrid', 'theta_L': 1.0}, expanded)
+
+    def test_no_variable_parameters(self):
+        """Tests the edge case where all parameters are fixed."""
+        params = {"theta_L": 1.0, "theta_H": 2.0}
+        expanded = _expand_parameters(params)
+        self.assertEqual(len(expanded), 1)
+        self.assertIn(params, expanded)
+
+    def test_parameter_values_are_objects(self):
+        """Tests expansion when a parameter value is a class object."""
+        params = {"developer_class": [RationalDeveloperAgent], "theta_L": 1.0}
+        expanded = _expand_parameters(params)
+        self.assertEqual(len(expanded), 1)
+        self.assertEqual(expanded[0]['developer_class'], RationalDeveloperAgent)
+
+    def test_empty_list_parameter(self):
+        """Tests the edge case where a variable parameter list is empty."""
+        params = {"nu": [], "theta_L": 1.0}
+        expanded = _expand_parameters(params)
+        # itertools.product with an empty list results in zero combinations
+        self.assertEqual(len(expanded), 0)
+
+
+class TestRunFunction(unittest.TestCase):
+    """
+    A dedicated test class for the main `run` function, using mocking.
+    """
     def setUp(self):
-        """Set up parameter configurations for reuse in tests."""
-        self.parameters = {
-            "nu": [0.2, 0.8], # Variable parameter
-            "theta_L": 1.0,   # Fixed parameter
-            "theta_H": 2.0,   # Fixed parameter
-            "delta_W": 1000.0,
-            "safety_bonus": 100.0,
-            "performance_bonus": 50.0,
-            "developer_class": RationalDeveloperAgent
+        """
+        Sets up a complete base parameter dictionary required by the SafetyModel.
+        """
+        self.base_params = {
+            'nu': 0.5,
+            'theta_L': 1.0,
+            'theta_H': 2.0,
+            'delta_W': 1000.0,
+            'safety_bonus': 100.0,
+            'performance_bonus': 50.0,
+            'developer_class': RationalDeveloperAgent,
+            'contract_type': 'hybrid'
         }
-        self.iterations = 10
 
     def test_input_validation(self):
-        """
-        Tests that the run function raises errors for various invalid inputs.
-        """
-        with self.assertRaises(TypeError, msg="Should fail if parameters is not a dict"):
-            run(parameters=[], iterations=self.iterations)
-        
-        with self.assertRaises(ValueError, msg="Should fail for non-positive iterations"):
-            run(parameters=self.parameters, iterations=0)
+        """Tests that the run function raises errors for invalid inputs."""
+        with self.assertRaises(TypeError):
+            run(parameters=[], iterations=1)
+        with self.assertRaises(ValueError):
+            run(parameters=self.base_params, iterations=0)
 
-    @patch('src.pipeline.mesa.batch_run')
-    def test_batch_run_called_correctly(self, mock_batch_run):
-        """
-        Tests that our pipeline function calls mesa.batch_run with the correct arguments,
-        including the internal wrapper class.
-        """
-        run(parameters=self.parameters, iterations=self.iterations)
-        
-        mock_batch_run.assert_called_once()
-        mock_batch_run.assert_called_with(
-            model_cls=_SafetyModelWrapper, # Crucially, it should call the wrapper
-            parameters=self.parameters,
-            iterations=self.iterations,
-            number_processes=1,
-            data_collection_period=-1,
-            display_progress=True
-        )
+    @patch('builtins.print')
+    def test_warning_for_multiprocessing(self, mock_print):
+        """Tests that a warning is printed when number_processes > 1."""
+        run(parameters=self.base_params, iterations=1, number_processes=4)
+        mock_print.assert_any_call("Warning: Custom pipeline does not support multiprocessing. "
+                                   "Running in a single process.")
 
-    @patch('src.pipeline.mesa.batch_run')
-    def test_result_processing(self, mock_batch_run):
+    @patch('src.pipeline.SafetyModel')
+    def test_run_count_and_instantiation(self, MockSafetyModel):
         """
-        Tests that the function correctly processes the raw output from batch_run.
+        Verifies that the model is instantiated the correct number of times.
         """
-        # Arrange: Configure the mock to return fake data
-        sample_raw_results = [{'RunId': 0, 'nu': 0.2}, {'RunId': 1, 'nu': 0.8}]
-        mock_batch_run.return_value = sample_raw_results
+        params = self.base_params.copy()
+        params['nu'] = [0.2, 0.8] # 2 combinations
+        iterations = 5
+        total_runs = 2 * iterations
         
+        run(parameters=params, iterations=iterations)
+        
+        self.assertEqual(MockSafetyModel.call_count, total_runs)
+
+    @patch('src.pipeline.SafetyModel')
+    def test_data_aggregation_structure(self, MockSafetyModel):
+        """
+        Verifies that the final DataFrame has the correct structure and columns.
+        """
+        # Arrange: Configure the mock model's datacollector
+        mock_instance = MockSafetyModel.return_value
+        mock_instance.datacollector.get_model_vars_dataframe.return_value = pd.DataFrame([{'SocialWelfare': -10}])
+        mock_instance.datacollector.get_agent_vars_dataframe.return_value = pd.DataFrame([{'Theta': 1.0, 'Payoff': 50}])
+
         # Act
-        results_df = run(parameters=self.parameters, iterations=1)
+        results_df = run(parameters=self.base_params, iterations=1)
         
         # Assert
         self.assertIsInstance(results_df, pd.DataFrame)
-        self.assertEqual(len(results_df), len(sample_raw_results))
-        self.assertIn('nu', results_df.columns)
+        self.assertEqual(len(results_df), 1)
+        
+        expected_cols = [
+            'SocialWelfare', 'Theta', 'Payoff', # from datacollector
+            'RunId', 'iteration',              # metadata
+            'developer_class', 'theta_L'       # from original params
+        ]
+        for col in expected_cols:
+            self.assertIn(col, results_df.columns)
 
-    @patch('src.pipeline.mesa.batch_run')
-    def test_parallelization_argument(self, mock_batch_run):
+    @patch('src.pipeline.SafetyModel')
+    def test_data_aggregation_content(self, MockSafetyModel):
         """
-        Tests that the number_processes argument is passed correctly.
+        Verifies that the content of the DataFrame for a single run is correct.
         """
-        run(parameters=self.parameters, iterations=self.iterations, number_processes=4)
-        call_args = mock_batch_run.call_args.kwargs
-        self.assertEqual(call_args['number_processes'], 4)
-
+        # Arrange
+        mock_instance = MockSafetyModel.return_value
+        mock_instance.datacollector.get_model_vars_dataframe.return_value = pd.DataFrame([{'SocialWelfare': -10}])
+        mock_instance.datacollector.get_agent_vars_dataframe.return_value = pd.DataFrame([{'Theta': 1.0, 'Payoff': 50}])
+        params = self.base_params.copy()
+        
+        # Act
+        results_df = run(parameters=params, iterations=1)
+        
+        # Assert
+        self.assertEqual(results_df.loc[0, 'SocialWelfare'], -10)
+        self.assertEqual(results_df.loc[0, 'Payoff'], 50)
+        self.assertEqual(results_df.loc[0, 'RunId'], 0)
+        self.assertEqual(results_df.loc[0, 'nu'], 0.5)
 
 if __name__ == '__main__':
     unittest.main()
+

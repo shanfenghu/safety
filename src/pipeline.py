@@ -1,17 +1,16 @@
 # src/pipeline.py
 
 """
-A reusable pipeline for running Mesa batch simulations.
+A custom, transparent pipeline for running simulations.
 
-This module abstracts the common logic for setting up and executing a Mesa
-batch run, processing the results into a pandas DataFrame, and providing
-user-friendly feedback like progress bars. It includes a wrapper to ensure
-compatibility between the model's constructor and Mesa's batch runner.
+This module provides a custom `run` function that replaces Mesa's `batch_run`.
+It manually handles parameter expansion and data aggregation, offering greater
+transparency and debuggability.
 """
 
-import mesa
 import pandas as pd
-from typing import Dict, Any, Optional
+from itertools import product
+from typing import Dict, List, Optional, Any
 
 # tqdm is used for progress bars. It is an optional dependency.
 try:
@@ -20,27 +19,41 @@ try:
 except ImportError:
     HAS_TQDM = False
 
-# Import the original model class that the pipeline will run
-from src.model import SafetyModel as OriginalSafetyModel
+from src.model import SafetyModel
 
-class _SafetyModelWrapper(OriginalSafetyModel):
+
+def _expand_parameters(parameters: Dict[str, Any]) -> List[Dict[str, Any]]:
     """
-    An internal wrapper to make our SafetyModel compatible with mesa.batch_run.
-    
-    Mesa's batch_run unpacks parameters as keyword arguments, but our model's
-    __init__ expects a single dictionary. This wrapper class bridges that gap
-    by accepting keyword arguments and passing them as a single dictionary to
-    the parent class constructor.
+    Expands a Mesa-style parameters dictionary into a list of all unique
+    parameter combinations.
+
+    This is an internal helper function.
+
+    Args:
+        parameters: A dictionary where keys are parameter names and values are
+                    either single values (fixed) or lists of values (variable).
+
+    Returns:
+        A list of dictionaries, where each dictionary is a unique parameter set.
     """
-    def __init__(self, **kwargs):
-        """
-        Initializes the wrapper.
+    # Separate variable parameters from fixed ones
+    variable_params = {k: v for k, v in parameters.items() if isinstance(v, list)}
+    fixed_params = {k: v for k, v in parameters.items() if not isinstance(v, list)}
+
+    # Handle the edge case where there are no variable parameters
+    if not variable_params:
+        return [fixed_params]
+
+    # Use itertools.product to create all combinations of variable parameters
+    keys, values = zip(*variable_params.items())
+    param_combinations = [dict(zip(keys, v)) for v in product(*values)]
+
+    # Add the fixed parameters to each combination
+    parameter_sets = []
+    for combo in param_combinations:
+        parameter_sets.append({**fixed_params, **combo})
         
-        Args:
-            **kwargs: Keyword arguments that will be collected into a single
-                      dictionary and passed to the parent model's constructor.
-        """
-        super().__init__(params=kwargs)
+    return parameter_sets
 
 
 def run(
@@ -49,45 +62,73 @@ def run(
     number_processes: Optional[int] = 1
 ) -> pd.DataFrame:
     """
-    Executes a batch run of the SafetyModel and returns the results.
+    Executes a batch run of the SafetyModel using a custom loop and returns the results.
 
-    This function serves as a standardized, robust pipeline for all experiments.
+    This function replaces `mesa.batch_run` to provide a more transparent and
+    debuggable experimental pipeline. Note: this implementation is single-threaded
+    and does not support parallel processing.
 
     Args:
         parameters: A dictionary mapping parameter names to either a single
-                    value (for fixed parameters) or a list of values (for
-                    variable parameters to be iterated over).
+                    value (fixed) or a list of values (variable).
         iterations: The number of times to run the simulation for each
                     unique combination of variable parameters.
-        number_processes: The number of processes to use for parallel execution.
-                          Defaults to 1 (no parallelization). Set to None to use
-                          all available CPU cores.
+        number_processes: This argument is kept for API compatibility but is
+                          not used. A warning will be issued if it's > 1.
 
     Returns:
         A pandas DataFrame containing the collected data from all simulation runs.
     """
-    # 1. Input Validation
+    # 1. Input Validation and Warnings
     if not isinstance(parameters, dict):
         raise TypeError("`parameters` must be a dictionary.")
     if not isinstance(iterations, int) or iterations < 1:
         raise ValueError("`iterations` must be a positive integer.")
-    if number_processes is not None and (not isinstance(number_processes, int) or number_processes < 1):
-        raise ValueError("`number_processes` must be a positive integer or None.")
+    if number_processes is not None and number_processes > 1:
+        print("Warning: Custom pipeline does not support multiprocessing. "
+              "Running in a single process.")
 
-    # 2. Execute the Batch Run using Mesa
-    print(f"Starting batch run with {iterations} iterations per parameter combination...")
+    # 2. Manually expand parameter sets
+    parameter_sets = _expand_parameters(parameters)
+    total_runs = len(parameter_sets) * iterations
+    print(f"Starting custom batch run: {len(parameter_sets)} configurations, "
+          f"{iterations} iterations each. Total runs: {total_runs}")
 
-    raw_results = mesa.batch_run(
-        model_cls=_SafetyModelWrapper, # Use the wrapper to ensure compatibility
-        parameters=parameters,
-        iterations=iterations,
-        number_processes=number_processes,
-        data_collection_period=-1, # Only collect data at the end of each run
-        display_progress=HAS_TQDM
-    )
+    # 3. Main Simulation Loop
+    all_run_data = []
+    run_id_counter = 0
 
-    # 3. Process and Return Results
-    results_df = pd.DataFrame(raw_results)
-    print(f"Batch run complete. Collected {len(results_df)} total runs.")
+    # Use tqdm for a progress bar if it's available
+    run_iterator = product(parameter_sets, range(iterations))
+    if HAS_TQDM:
+        run_iterator = tqdm(run_iterator, total=total_runs)
+
+    for params, i in run_iterator:
+        # a. Instantiate the model with the specific parameters for this run
+        model = SafetyModel(params=params)
+        
+        # b. Run the model for one step (as it's a one-shot game)
+        model.step()
+        
+        # c. Collect data for this run
+        # Get the last row of the model and agent dataframes
+        model_data = model.datacollector.get_model_vars_dataframe().iloc[-1]
+        agent_data = model.datacollector.get_agent_vars_dataframe().iloc[-1]
+        
+        # d. Combine all data and add metadata
+        run_data = {**model_data, **agent_data}
+        run_data['RunId'] = run_id_counter
+        run_data['iteration'] = i
+        
+        # Add the original parameters to the row for easy grouping later
+        run_data.update(params)
+        
+        all_run_data.append(run_data)
+        run_id_counter += 1
+
+    # 4. Final Data Aggregation
+    results_df = pd.DataFrame(all_run_data)
+    print(f"\nBatch run complete. Collected {len(results_df)} total runs.")
     
     return results_df
+
