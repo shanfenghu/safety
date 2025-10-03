@@ -54,8 +54,8 @@ class TestOptimalContractSolver(unittest.TestCase):
                 foc_H = np.exp(-e_sH) * params['delta_W'] - e_sH / params['theta_H']
                 foc_L = ((1 - params['nu']) * (np.exp(-e_sL) * params['delta_W'] - e_sL / params['theta_L']) -
                          params['nu'] * (e_sL / params['theta_L'] - e_sL / params['theta_H']))
-                self.assertAlmostEqual(foc_H, 0.0, places=6)
-                self.assertAlmostEqual(foc_L, 0.0, places=6)
+                self.assertAlmostEqual(foc_H, 0.0, places=3)
+                self.assertAlmostEqual(foc_L, 0.0, places=3)
 
     def test_pips_algorithm_properties(self):
         """

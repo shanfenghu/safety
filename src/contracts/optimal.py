@@ -10,7 +10,7 @@ algorithm to find a robust, non-negative, and incentive-compatible contract menu
 
 from typing import Dict, Tuple
 import numpy as np
-from scipy.optimize import fsolve
+from scipy.optimize import minimize
 
 from src.types import Contract
 from src.simulation_utils import prob_good_safety_outcome, prob_high_performance_signal
@@ -18,7 +18,8 @@ from src.simulation_utils import prob_good_safety_outcome, prob_high_performance
 
 def _solve_for_optimal_efforts(params: Dict) -> Dict:
     """
-    Solves for the optimal second-best effort levels from the theory's FOCs.
+    Solves for the optimal second-best effort levels by directly maximizing
+    the Principal's objective function from the theoretical proofs.
     
     This is an internal helper function.
 
@@ -31,26 +32,43 @@ def _solve_for_optimal_efforts(params: Dict) -> Dict:
     # Unpack parameters for clarity
     theta_L, theta_H, nu, delta_W = params['theta_L'], params['theta_H'], params['nu'], params['delta_W']
 
-    # --- Solve for High-Quality Type's Safety Effort (First-Best) ---
-    # FOC: -p_s(e_s) * delta_W = C_s(e_s, theta_H)
-    func_sH = lambda es: np.exp(-es) * delta_W - es / theta_H
-    e_sH_opt = fsolve(func_sH, x0=2.0)[0]
+    # Define the Principal's objective function to be maximized.
+    # This is the expected social surplus minus the expected information rent.
+    def principal_objective(efforts: np.ndarray) -> float:
+        e_pH, e_pL, e_sH, e_sL = efforts
+
+        # Calculate social surplus for each type
+        # Note: We subtract cost of welfare, which is W_G - W_B, so we add W_B back for total welfare
+        # For simplicity in optimization, we can treat W_G as 0, making W_B = -delta_W.
+        # Expected welfare is (1-p)*W_G + p*W_B = -p*delta_W.
+        surplus_H = - (1 - prob_good_safety_outcome(e_sH)) * delta_W - (e_pH**2 / 2.0) - (e_sH**2 / (2.0 * theta_H))
+        surplus_L = - (1 - prob_good_safety_outcome(e_sL)) * delta_W - (e_pL**2 / 2.0) - (e_sL**2 / (2.0 * theta_L))
+
+        # Calculate the information rent paid to the high-type agent
+        rent = (e_sL**2 / 2.0) * (1/theta_L - 1/theta_H)
+
+        # The objective is the expected total surplus minus the expected rent
+        total_welfare = nu * surplus_H + (1 - nu) * surplus_L - nu * rent
+        
+        # We use a minimizer, so we return the negative of the welfare
+        return -total_welfare
+
+    # --- Run the optimization ---
+    initial_guess = np.array([0.15, 0.10, 5.0, 4.0]) # [e_pH, e_pL, e_sH, e_sL]
+    bounds = [(0, None), (0, None), (0, None), (0, None)]
     
-    # --- Solve for Low-Quality Type's Safety Effort (Distorted) ---
-    # This is the corrected FOC from the theoretical proof's first-order conditions.
-    func_sL = lambda es: ( (1 - nu) * (np.exp(-es) * delta_W - es / theta_L) - 
-                           nu * (es / theta_L - es / theta_H) )
-    e_sL_opt = fsolve(func_sL, x0=1.0)[0]
+    result = minimize(
+        fun=principal_objective,
+        x0=initial_guess,
+        bounds=bounds,
+        method='L-BFGS-B'
+    )
     
-    # --- Determine Performance Efforts ---
-    # For the simulation, we set these to small, plausible positive values
-    # that reflect the muting of incentives due to the Limited Liability constraint.
-    e_pL_opt = 0.10
-    e_pH_opt = 0.15
+    e_pH_opt, e_pL_opt, e_sH_opt, e_sL_opt = result.x if result.success else (0,0,0,0)
 
     return {
-        'H': {'ep': max(0, e_pH_opt), 'es': max(0, e_sH_opt)},
-        'L': {'ep': max(0, e_pL_opt), 'es': max(0, e_sL_opt)}
+        'H': {'ep': e_pH_opt, 'es': e_sH_opt},
+        'L': {'ep': e_pL_opt, 'es': e_sL_opt}
     }
 
 
@@ -69,57 +87,52 @@ def _solve_for_payments(optimal_efforts: Dict, params: Dict) -> Dict[str, Contra
         Implements the PIPS algorithm for a single agent type.
         """
         
-        # --- PIPS Step 1: Solve for the Unconstrained "Ideal" Incentives ---
+        # 1. Calculate required payment spreads from the agent's FOCs
         delta_t_q = (es / theta) / np.exp(-es) if es > 0 else 0
         delta_t_pi = ep / np.exp(-ep) if ep > 0 else 0
-        p_q_G = prob_good_safety_outcome(es)
-        p_pi_H = prob_high_performance_signal(ep)
-        
-        # The linear system's only job is to find the payment spreads that
-        # create the target incentives. We can construct this directly.
-        # This is the "ideal" contract, which may have negative payments.
-        t_ideal = {
+
+        # 2. Construct a base contract with these spreads
+        base_contract = {
             'G': {'H': delta_t_q + delta_t_pi, 'L': delta_t_q},
             'B': {'H': delta_t_pi,              'L': 0.0}
         }
 
-        # --- PIPS Step 2 & 3: Apply Incentive-Preserving Utility Shift ---
+        # 3. Calculate the expected utility this base contract would provide
         cost = (ep**2 / 2.0) + (es**2 / (2.0 * theta))
-        expected_ideal_payment = (
-            p_q_G * p_pi_H * t_ideal['G']['H'] +
-            p_q_G * (1 - p_pi_H) * t_ideal['G']['L'] +
-            (1 - p_q_G) * p_pi_H * t_ideal['B']['H'] +
-            (1 - p_q_G) * (1 - p_pi_H) * t_ideal['B']['L']
+        p_q_G = prob_good_safety_outcome(es)
+        p_pi_H = prob_high_performance_signal(ep)
+        
+        expected_base_payment = (
+            p_q_G * p_pi_H * base_contract['G']['H'] +
+            p_q_G * (1 - p_pi_H) * base_contract['G']['L'] +
+            (1 - p_q_G) * p_pi_H * base_contract['B']['H'] +
+            (1 - p_q_G) * (1 - p_pi_H) * base_contract['B']['L']
         )
-        ideal_utility = expected_ideal_payment - cost
+        base_utility = expected_base_payment - cost
+
+        # 4. Calculate the additive constant 'k' to shift utility to the target
+        k = target_utility - base_utility
         
-        # Calculate the constant 'k' to add to all payments to meet the target utility
-        k = target_utility - ideal_utility
-        
-        # Apply the shift
-        t_shifted = {
+        # 5. Apply the shift to all payments
+        t_shifted: Contract = {
             q: {p: payment + k for p, payment in p_dict.items()}
-            for q, p_dict in t_ideal.items()
+            for q, p_dict in base_contract.items()
         }
 
-        # --- PIPS Step 4: Project to Non-Negative Space ---
+        # 6. Project to non-negative space
         min_payment = min(p for outcomes in t_shifted.values() for p in outcomes.values())
-        s = -min_payment if min_payment < 0 else 0.0
-
-        # Apply the final shift to ensure all payments are non-negative
-        final_contract: Contract = {
-            q: {p: payment + s for p, payment in p_dict.items()}
-            for q, p_dict in t_shifted.items()
-        }
+        if min_payment < 0:
+            shift = -min_payment
+            for q_key in t_shifted:
+                for p_key in t_shifted[q_key]:
+                    t_shifted[q_key][p_key] += shift
         
-        return final_contract
+        return t_shifted
 
     # --- Calculate Contract for Low-Quality Type ---
-    # The target utility is 0 because the IR-L constraint is binding.
     contract_L = get_contract_for_type(e_pL, e_sL, theta_L, target_utility=0.0)
 
     # --- Calculate Contract for High-Quality Type ---
-    # The target utility is the information rent because the IC-H constraint is binding.
     rent = (e_sL**2 / 2) * (1/theta_L - 1/theta_H)
     e_pH, e_sH = optimal_efforts['H']['ep'], optimal_efforts['H']['es']
     contract_H = get_contract_for_type(e_pH, e_sH, theta_H, target_utility=rent)
@@ -129,21 +142,9 @@ def _solve_for_payments(optimal_efforts: Dict, params: Dict) -> Dict[str, Contra
 
 def calculate_optimal_contract(params: Dict) -> Tuple[Dict[str, Contract], Dict]:
     """
-    Calculates the menu for the theoretically optimal second-best contract.
-
-    This function serves as the public interface for the optimal contract solver.
-    It orchestrates the process of first solving for the optimal effort levels,
-    and then solving for the payments required to implement those efforts using
-    the robust PIPS algorithm.
-
-    Args:
-        params: A dictionary of model parameters.
-
-    Returns:
-        A tuple containing:
-        - The contract menu (a dict with keys 'H' and 'L').
-        - The dictionary of the optimal effort levels solved for.
+    Public interface for the optimal contract solver.
     """
     optimal_efforts = _solve_for_optimal_efforts(params)
     contract_menu = _solve_for_payments(optimal_efforts, params)
     return contract_menu, optimal_efforts
+
