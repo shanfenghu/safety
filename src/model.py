@@ -67,7 +67,13 @@ class SafetyModel(mesa.Model):
         # The regulator "offers" the contract menu appropriate for the experiment
         contract_type = self.params.get('contract_type', 'optimal')
         
-        if contract_type == 'optimal':
+        if contract_type == 'pre_calculated_optimal':
+            # This special type allows experiments to bypass the slow solver by
+            # using a contract menu that has been passed in directly.
+            menu = self.params['pre_calculated_menu']
+            self.regulator.contract_menu = menu
+            self.developer.contract_offer = self.regulator.contract_menu[dev_type_key]
+        elif contract_type == 'optimal':
             menu, _ = calculate_optimal_contract(self.params)
             self.regulator.contract_menu = menu
             self.developer.contract_offer = self.regulator.contract_menu[dev_type_key]
