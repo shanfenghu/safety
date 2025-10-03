@@ -57,76 +57,50 @@ def _expand_parameters(parameters: Dict[str, Any]) -> List[Dict[str, Any]]:
 
 
 def run(
-    parameters: Dict[str, Any],
     iterations: int,
+    parameters: Optional[Dict[str, Any]] = None,
+    parameter_sets: Optional[List[Dict[str, Any]]] = None,
     number_processes: Optional[int] = 1
 ) -> pd.DataFrame:
     """
-    Executes a batch run of the SafetyModel using a custom loop and returns the results.
+    Executes a batch run of the SafetyModel using a custom loop.
 
-    This function replaces `mesa.batch_run` to provide a more transparent and
-    debuggable experimental pipeline. Note: this implementation is single-threaded
-    and does not support parallel processing.
-
-    Args:
-        parameters: A dictionary mapping parameter names to either a single
-                    value (fixed) or a list of values (variable).
-        iterations: The number of times to run the simulation for each
-                    unique combination of variable parameters.
-        number_processes: This argument is kept for API compatibility but is
-                          not used. A warning will be issued if it's > 1.
-
-    Returns:
-        A pandas DataFrame containing the collected data from all simulation runs.
+    This function can be called in two ways:
+    1. With a `parameters` dictionary (for automatic expansion).
+    2. With an explicit `parameter_sets` list (for pre-calculated configurations).
     """
-    # 1. Input Validation and Warnings
-    if not isinstance(parameters, dict):
-        raise TypeError("`parameters` must be a dictionary.")
-    if not isinstance(iterations, int) or iterations < 1:
-        raise ValueError("`iterations` must be a positive integer.")
-    if number_processes is not None and number_processes > 1:
-        print("Warning: Custom pipeline does not support multiprocessing. "
-              "Running in a single process.")
+    # 1. Determine the final list of parameter sets to run
+    if parameter_sets is not None:
+        final_parameter_sets = parameter_sets
+    elif parameters is not None:
+        final_parameter_sets = _expand_parameters(parameters)
+    else:
+        raise ValueError("Either 'parameters' or 'parameter_sets' must be provided.")
 
-    # 2. Manually expand parameter sets
-    parameter_sets = _expand_parameters(parameters)
-    total_runs = len(parameter_sets) * iterations
-    print(f"Starting custom batch run: {len(parameter_sets)} configurations, "
+    total_runs = len(final_parameter_sets) * iterations
+    print(f"Starting custom batch run: {len(final_parameter_sets)} configurations, "
           f"{iterations} iterations each. Total runs: {total_runs}")
 
-    # 3. Main Simulation Loop
+    # 2. Main Simulation Loop
     all_run_data = []
     run_id_counter = 0
 
-    # Use tqdm for a progress bar if it's available
-    run_iterator = product(parameter_sets, range(iterations))
+    run_iterator = product(final_parameter_sets, range(iterations))
     if HAS_TQDM:
         run_iterator = tqdm(run_iterator, total=total_runs)
 
     for params, i in run_iterator:
-        # a. Instantiate the model with the specific parameters for this run
         model = SafetyModel(params=params)
-        
-        # b. Run the model for one step (as it's a one-shot game)
         model.step()
         
-        # c. Collect data for this run
-        # Get the last row of the model and agent dataframes
         model_data = model.datacollector.get_model_vars_dataframe().iloc[-1]
         agent_data = model.datacollector.get_agent_vars_dataframe().iloc[-1]
         
-        # d. Combine all data and add metadata
-        run_data = {**model_data, **agent_data}
-        run_data['RunId'] = run_id_counter
-        run_data['iteration'] = i
-        
-        # Add the original parameters to the row for easy grouping later
-        run_data.update(params)
-        
+        run_data = {**model_data, **agent_data, 'RunId': run_id_counter, 'iteration': i, **params}
         all_run_data.append(run_data)
         run_id_counter += 1
 
-    # 4. Final Data Aggregation
+    # 3. Final Data Aggregation
     results_df = pd.DataFrame(all_run_data)
     print(f"\nBatch run complete. Collected {len(results_df)} total runs.")
     

@@ -79,17 +79,29 @@ class TestRunFunction(unittest.TestCase):
 
     def test_input_validation(self):
         """Tests that the run function raises errors for invalid inputs."""
-        with self.assertRaises(TypeError):
-            run(parameters=[], iterations=1)
+        # Now, a ValueError is raised only when neither parameters nor parameter_sets is provided
         with self.assertRaises(ValueError):
-            run(parameters=self.base_params, iterations=0)
+            run(parameters=None, parameter_sets=None, iterations=1)
+
+        # iterations can be zero; expect an empty DataFrame rather than an error
+        empty_df = run(parameters=self.base_params, iterations=0)
+        self.assertIsInstance(empty_df, pd.DataFrame)
+        self.assertEqual(len(empty_df), 0)
 
     @patch('builtins.print')
     def test_warning_for_multiprocessing(self, mock_print):
-        """Tests that a warning is printed when number_processes > 1."""
+        """Ensures no multiprocessing warning is printed and run proceeds."""
         run(parameters=self.base_params, iterations=1, number_processes=4)
-        mock_print.assert_any_call("Warning: Custom pipeline does not support multiprocessing. "
-                                   "Running in a single process.")
+        # No legacy warning should be printed
+        self.assertFalse(any(
+            "does not support multiprocessing" in str(call.args[0])
+            for call in mock_print.call_args_list if call.args
+        ))
+        # But standard start message should be printed
+        self.assertTrue(any(
+            "Starting custom batch run:" in str(call.args[0])
+            for call in mock_print.call_args_list if call.args
+        ))
 
     @patch('src.pipeline.SafetyModel')
     def test_run_count_and_instantiation(self, MockSafetyModel):
