@@ -6,6 +6,7 @@ dependencies = [
     "pandas",
     "scipy",
     "matplotlib",
+    "seaborn",
     "pytest",
     "mesa"
 ]
