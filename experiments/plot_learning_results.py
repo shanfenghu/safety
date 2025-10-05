@@ -106,7 +106,7 @@ def main():
         # Plot Performance Effort on the right axis
         ax2.plot(subset['Step'], subset['SmoothedEp'], color=color, linestyle='--', linewidth=3)
 
-    ax1.set_title("(a) Learning Curves: Average Chosen Efforts Over Time", fontsize=18, weight='bold')
+    ax1.set_title("(a) Learning Curves: Average Chosen Efforts Over Time", weight='bold')
     ax1.set_xlabel("Learning Step")
     ax1.set_ylabel("Mean Safety Effort ($e_s$)", color='black')
     ax2.set_ylabel("Mean Performance Effort ($e_p$)", color='black')
@@ -163,7 +163,7 @@ def main():
             yticklabels=es_labels,
             annot_kws={"size":18}
         )
-        ax.set_title(f"{name.capitalize()} Contract", fontsize=18, weight="bold")
+        ax.set_title(f"{name.capitalize()} Contract", weight="bold")
         ax.set_xlabel("Performance Effort ($e_p$)")
         ax.set_ylabel("Safety Effort ($e_s$)")
         ax.invert_yaxis()
@@ -183,8 +183,7 @@ def main():
     except Exception:
         pass
 
-    fig.text(0.5, 0.565, "(b) Heatmaps of Learned Q-Values", 
-             ha='center', va='center', fontsize=18, weight='bold')
+    fig.text(0.5, 0.565, "(b) Heatmaps of Learned Q-Values", ha='center', va='center', weight='bold', fontsize=20)
 
     # 4. Final layout and save
     # Reserve right margin for the shared colorbar to avoid overlap
