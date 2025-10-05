@@ -20,7 +20,8 @@ from src.simulation_utils import prob_good_safety_outcome, prob_high_performance
 def _calculate_mimicking_utility(
     contract_L: Contract,
     mimic_theta: float,
-    true_theta: float
+    true_theta: float,
+    risk_averse: bool = False  # MODIFICATION: Added risk_averse flag
 ) -> float:
     """
     Calculates the maximum utility a high-quality agent can get by taking
@@ -33,6 +34,7 @@ def _calculate_mimicking_utility(
         contract_L: The contract intended for the low-quality agent.
         mimic_theta: The theta of the agent choosing the efforts (i.e., theta_H).
         true_theta: The theta used in the cost function for the efforts chosen (i.e., theta_H)
+        risk_averse: If True, calculates utility using a sqrt function for payments.
 
     Returns:
         The maximum achievable utility for the mimicking agent.
@@ -46,13 +48,23 @@ def _calculate_mimicking_utility(
         p_pi_H = prob_high_performance_signal(e_p)
         p_q_G = prob_good_safety_outcome(e_s)
         
-        expected_payment = (
-            p_q_G * p_pi_H * contract_L['G']['H'] +
-            p_q_G * (1 - p_pi_H) * contract_L['G']['L'] +
-            (1 - p_q_G) * p_pi_H * contract_L['B']['H'] +
-            (1 - p_q_G) * (1 - p_pi_H) * contract_L['B']['L']
-        )
-        return expected_payment - cost
+        # MODIFICATION: Conditionally apply sqrt to payments for risk-averse utility
+        if risk_averse:
+            expected_utility_of_payment = (
+                p_q_G * p_pi_H * np.sqrt(contract_L['G']['H']) +
+                p_q_G * (1 - p_pi_H) * np.sqrt(contract_L['G']['L']) +
+                (1 - p_q_G) * p_pi_H * np.sqrt(contract_L['B']['H']) +
+                (1 - p_q_G) * (1 - p_pi_H) * np.sqrt(contract_L['B']['L'])
+            )
+            return expected_utility_of_payment - cost
+        else:
+            expected_payment = (
+                p_q_G * p_pi_H * contract_L['G']['H'] +
+                p_q_G * (1 - p_pi_H) * contract_L['G']['L'] +
+                (1 - p_q_G) * p_pi_H * contract_L['B']['H'] +
+                (1 - p_q_G) * (1 - p_pi_H) * contract_L['B']['L']
+            )
+            return expected_payment - cost
 
     # The optimizer minimizes the *negative* utility
     objective_func = lambda e: -utility_func(e)
@@ -69,7 +81,7 @@ def _calculate_mimicking_utility(
     return -result.fun if result.success else 0.0
 
 
-def _solve_for_payments(optimal_efforts: Dict, params: Dict) -> Dict[str, Contract]:
+def _solve_for_payments(optimal_efforts: Dict, params: Dict, risk_averse: bool = False) -> Dict[str, Contract]:
     """
     Calculates the 8 payment values for the contract menu using the PIPS algorithm.
     This version correctly calculates the true information rent.
@@ -93,6 +105,10 @@ def _solve_for_payments(optimal_efforts: Dict, params: Dict) -> Dict[str, Contra
         cost = (ep**2 / 2.0) + (es**2 / (2.0 * theta))
         p_q_G = prob_good_safety_outcome(es)
         p_pi_H = prob_high_performance_signal(ep)
+        
+        # MODIFICATION: The PIPS algorithm's core logic remains based on risk-neutral incentives,
+        # as it solves for the payment spreads directly. The risk-aversion is handled
+        # in the utility calculation for setting the *target* utility level (information rent).
         expected_base_payment = (
             p_q_G * p_pi_H * base_contract['G']['H'] +
             p_q_G * (1 - p_pi_H) * base_contract['G']['L'] +
@@ -119,11 +135,12 @@ def _solve_for_payments(optimal_efforts: Dict, params: Dict) -> Dict[str, Contra
 
     # --- Stage 2: Calculate the True Information Rent ---
     # We simulate what a high-type agent would do with the low-type contract
-    # to find their true mimicking utility.
+    # to find their true mimicking utility, considering their risk preference.
     true_information_rent = _calculate_mimicking_utility(
         contract_L=contract_L,
-        mimic_theta=theta_H, # The agent's type
-        true_theta=theta_H   # The agent's true cost function
+        mimic_theta=theta_H, 
+        true_theta=theta_H,
+        risk_averse=risk_averse # MODIFICATION: Pass the flag here
     )
     
     # --- Stage 3: Calculate the High-Quality Type's Contract ---
@@ -134,7 +151,7 @@ def _solve_for_payments(optimal_efforts: Dict, params: Dict) -> Dict[str, Contra
     return {'H': contract_H, 'L': contract_L}
 
 
-def _solve_for_optimal_efforts(params: Dict) -> Dict:
+def _solve_for_optimal_efforts(params: Dict, risk_averse: bool = False) -> Dict:
     """
     Solves for the true optimal second-best effort levels by directly
     maximizing the Principal's objective function.
@@ -150,23 +167,23 @@ def _solve_for_optimal_efforts(params: Dict) -> Dict:
     def principal_objective(efforts: np.ndarray) -> float:
         e_pH, e_pL, e_sH, e_sL = efforts
         
-        # Create a temporary effort dictionary to pass to the payment solver
         temp_efforts = {
             'H': {'ep': e_pH, 'es': e_sH},
             'L': {'ep': e_pL, 'es': e_sL}
         }
         
         # --- Inner Optimization: Find the cost of the contract ---
-        # For these efforts, find the best possible non-negative contract
-        contract_menu = _solve_for_payments(temp_efforts, params)
+        # Pass the risk_averse flag to the payment solver
+        contract_menu = _solve_for_payments(temp_efforts, params, risk_averse=risk_averse)
 
         # --- Calculate the Principal's Expected Utility ---
-        # Expected Social Welfare (avoids disaster)
         welfare_H = (1 - prob_good_safety_outcome(e_sH)) * -delta_W
         welfare_L = (1 - prob_good_safety_outcome(e_sL)) * -delta_W
         expected_welfare = nu * welfare_H + (1 - nu) * welfare_L
 
         # Expected Payments (cost of the contracts)
+        # The Principal is risk-neutral, so their cost is the actual expected payment,
+        # not the agent's utility from it.
         p_pi_H_H = prob_high_performance_signal(e_pH); p_q_G_H = prob_good_safety_outcome(e_sH)
         p_pi_H_L = prob_high_performance_signal(e_pL); p_q_G_L = prob_good_safety_outcome(e_sL)
         
@@ -180,11 +197,9 @@ def _solve_for_optimal_efforts(params: Dict) -> Dict:
 
         expected_payments = nu * exp_payment_H + (1 - nu) * exp_payment_L
         
-        # The optimizer's goal is to maximize this utility, so we return its negative
         return -(expected_welfare - expected_payments)
 
     # --- Run the Outer Optimization ---
-    # Use the provided initial guess if available, otherwise use a default
     initial_guess = params.get('initial_guess', np.array([0.15, 0.10, 5.0, 4.0]))
     bounds = [(0, None), (0, None), (0, None), (0, None)]
     
@@ -200,11 +215,11 @@ def _solve_for_optimal_efforts(params: Dict) -> Dict:
     return {
         'H': {'ep': e_pH_opt, 'es': e_sH_opt},
         'L': {'ep': e_pL_opt, 'es': e_sL_opt},
-        'solver_solution': result.x # Also return the raw solution vector for the warm start
+        'solver_solution': result.x 
     }
 
 
-def calculate_optimal_contract(params: Dict) -> Tuple[Dict[str, Contract], Dict]:
+def calculate_optimal_contract(params: Dict, risk_averse: bool = False) -> Tuple[Dict[str, Contract], Dict]:
     """
     Calculates the menu for the theoretically optimal second-best contract.
 
@@ -214,12 +229,14 @@ def calculate_optimal_contract(params: Dict) -> Tuple[Dict[str, Contract], Dict]
 
     Args:
         params: A dictionary of model parameters.
+        risk_averse: If True, solves for the optimal contract for a risk-averse agent.
 
     Returns:
         A tuple containing:
         - The contract menu (a dict with keys 'H' and 'L').
         - The dictionary of the optimal effort levels solved for.
     """
-    optimal_efforts = _solve_for_optimal_efforts(params)
-    contract_menu = _solve_for_payments(optimal_efforts, params)
+    # MODIFICATION: Pass the risk_averse flag to the effort and payment solvers
+    optimal_efforts = _solve_for_optimal_efforts(params, risk_averse=risk_averse)
+    contract_menu = _solve_for_payments(optimal_efforts, params, risk_averse=risk_averse)
     return contract_menu, optimal_efforts
