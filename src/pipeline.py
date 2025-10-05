@@ -81,6 +81,10 @@ def run(
         run_agent_data.reset_index(inplace=True)
         run_model_data.reset_index(inplace=True)
 
+        # Filter to developer-only rows to avoid missing reporter fields on other agents
+        if isinstance(run_agent_data, pd.DataFrame) and 'AgentID' in run_agent_data.columns:
+            run_agent_data = run_agent_data[run_agent_data['AgentID'] == model.developer.unique_id]
+
         # Robustly ensure the step column is named 'Step' for both frames
         # Mesa may produce an unnamed index -> reset_index will call it 'index'
         for df in (run_agent_data, run_model_data):
@@ -90,11 +94,16 @@ def run(
                 elif 'step' in df.columns:
                     df.rename(columns={'step': 'Step'}, inplace=True)
         
-        # Normalize dtype of 'Step' to avoid merge type mismatches
+        # Normalize dtype of 'Step' and drop duplicate index/column ambiguity
         if 'Step' in run_agent_data.columns:
             run_agent_data['Step'] = pd.to_numeric(run_agent_data['Step'], errors='coerce').astype('Int64')
         if 'Step' in run_model_data.columns:
             run_model_data['Step'] = pd.to_numeric(run_model_data['Step'], errors='coerce').astype('Int64')
+        # If Step also exists as an index level (rare after reset_index), drop index to avoid ambiguity
+        if isinstance(run_agent_data.index, pd.MultiIndex) or 'Step' in getattr(run_agent_data.index, 'names', []):
+            run_agent_data = run_agent_data.reset_index(drop=True)
+        if isinstance(run_model_data.index, pd.MultiIndex) or 'Step' in getattr(run_model_data.index, 'names', []):
+            run_model_data = run_model_data.reset_index(drop=True)
         
         # Add metadata
         run_agent_data['RunId'] = run_id_counter
@@ -106,6 +115,20 @@ def run(
         
         # Merge model-level and agent-level data based on the 'Step'
         full_run_data = pd.merge(run_agent_data, run_model_data, on='Step')
+        # If merge unexpectedly produces zero rows (e.g., off-by-one step indexing), try alignment fallbacks
+        if full_run_data.empty and not run_agent_data.empty and not run_model_data.empty and 'Step' in run_agent_data.columns and 'Step' in run_model_data.columns:
+            # Try shifting agent steps by -1 then +1 and pick the merge with more rows
+            best_merge = full_run_data
+            best_len = 0
+            for shift in (-1, 1):
+                shifted = run_agent_data.copy()
+                shifted['Step'] = shifted['Step'] + shift
+                candidate = pd.merge(shifted, run_model_data, on='Step')
+                if len(candidate) > best_len:
+                    best_len = len(candidate)
+                    best_merge = candidate
+            if best_len > 0:
+                full_run_data = best_merge
         
         all_run_data.append(full_run_data)
 
