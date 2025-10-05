@@ -75,7 +75,13 @@ class SafetyModel(mesa.Model):
             self.regulator.contract_menu = menu
             self.developer.contract_offer = self.regulator.contract_menu[dev_type_key]
         elif contract_type == 'optimal':
-            menu, _ = calculate_optimal_contract(self.params)
+            # Call the solver for the risk-neutral case
+            menu, _ = calculate_optimal_contract(self.params, risk_averse=False)
+            self.regulator.contract_menu = menu
+            self.developer.contract_offer = self.regulator.contract_menu[dev_type_key]
+        elif contract_type == 'optimal_ra':
+            # Call the SAME solver but for the risk-averse case
+            menu, _ = calculate_optimal_contract(self.params, risk_averse=True)
             self.regulator.contract_menu = menu
             self.developer.contract_offer = self.regulator.contract_menu[dev_type_key]
         else:
