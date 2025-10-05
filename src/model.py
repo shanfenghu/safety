@@ -37,6 +37,7 @@ class SafetyModel(mesa.Model):
         super().__init__()
         self.params = params
         self.running = True
+        self.max_steps = self.params.get('max_steps', 1) # Default to 1 for our single-shot experiments
         self.correlation_k = self.params.get('correlation_k', 0.0)
 
         # --- Setup Agents and Scheduler ---
@@ -134,3 +135,7 @@ class SafetyModel(mesa.Model):
         
         # 5. Collect data for this step
         self.datacollector.collect(self)
+
+        # 6. Check for stopping condition in multi-step runs
+        if self.schedule.steps >= self.max_steps:
+            self.running = False
