@@ -90,9 +90,9 @@ def main():
     # --- 2. Execute the Simulation Pipeline ---
     print("\nStep 2: Executing simulation pipeline...")
     
-    results_df = run(
+    results_df, _ = run(
         parameters=params,
-        iterations=config.ITERATIONS,
+        iterations=config.ITERATIONS * 10,
         number_processes=config.NUM_PROCESSES
     )
     
