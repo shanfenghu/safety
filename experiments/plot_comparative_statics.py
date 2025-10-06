@@ -89,7 +89,7 @@ def main():
     # Combine legends from both axes into one
     lines, labels = ax1.get_legend_handles_labels()
     lines2, labels2 = ax2.get_legend_handles_labels()
-    ax2.legend(lines + lines2, labels + labels2)
+    ax2.legend(lines + lines2, labels + labels2, loc="best")
 
     plt.tight_layout()
 

@@ -25,7 +25,7 @@ def main():
     print("--- Starting Comparative Statics Experiment (Two-Phase) ---")
 
     # --- 1. Setup the Parameter Sweep ---
-    delta_w_sweep = np.linspace(100, 5000, 20)
+    delta_w_sweep = np.linspace(100, 5000, 50)
     base_params = config.BASELINE_PARAMS.copy()
     base_params.update(config.AGENT_CONFIGS['rational'])
     
@@ -57,13 +57,13 @@ def main():
 
     # --- Phase 2: Stochastic Simulation with Pre-calculated Contracts ---
     print("\n--- Phase 2: Running stochastic simulations for statistics ---")
-    iterations = config.ITERATIONS
+    iterations = config.ITERATIONS * 10
     print(f"Running {iterations} iterations for each of the {len(delta_w_sweep)} solved points.")
     
     # We now call our robust pipeline with the list of fully defined parameter sets.
     # The pipeline will handle the iterations and data aggregation.
-    results_df = run(
-        parameter_sets=parameter_sets_for_pipeline,
+    results_df, _ = run(
+        parameters=parameter_sets_for_pipeline,
         iterations=iterations,
         number_processes=config.NUM_PROCESSES
     )
