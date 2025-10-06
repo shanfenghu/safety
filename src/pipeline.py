@@ -10,7 +10,7 @@ and multi-step (e.g., learning) simulations.
 
 import pandas as pd
 from itertools import product
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Union
 
 try:
     from tqdm.auto import tqdm
@@ -38,19 +38,29 @@ def _expand_parameters(parameters: Dict[str, Any]) -> List[Dict[str, Any]]:
 
 
 def run(
-    parameters: Dict[str, Any],
-    iterations: int,
+    parameters: Union[Dict, List[Dict]],
+    iterations: int = 1,
     number_processes: Optional[int] = 1
 ) -> pd.DataFrame:
     """
     Executes a batch run of the SafetyModel using a custom loop and returns the results.
     """
-    if not isinstance(parameters, dict):
-        raise TypeError("`parameters` must be a dictionary.")
+    if isinstance(parameters, list):
+        # If a list of parameter sets is provided directly, use it
+        parameter_sets = parameters
+        print(f"Starting custom batch run: {len(parameter_sets)} pre-defined configurations, {iterations} iterations each.")
+    elif isinstance(parameters, dict):
+        # If a dictionary is provided, expand it into all combinations
+        # Ensure all values are lists for the product function
+        parameter_sets = _expand_parameters(parameters)
+        print(f"Starting batch run: {len(parameter_sets)} configurations, {iterations} iterations each.")
+    else:
+        # If the input is neither a list nor a dictionary, raise an error
+        raise TypeError("`parameters` must be a dictionary or a list of dictionaries.")
+
     if number_processes is not None and number_processes > 1:
         print("Warning: Custom pipeline does not support multiprocessing. Running in a single process.")
 
-    parameter_sets = _expand_parameters(parameters)
     total_runs = len(parameter_sets) * iterations
     print(f"Starting custom batch run: {len(parameter_sets)} configurations, "
           f"{iterations} iterations each. Total runs: {total_runs}")
@@ -109,9 +119,14 @@ def run(
         run_agent_data['RunId'] = run_id_counter
         run_agent_data['iteration'] = i
         for param_key, param_val in params.items():
-            # Avoid adding list parameters to the final dataframe
-            if not isinstance(param_val, list):
-                run_agent_data[param_key] = param_val
+            # More robustly add parameters, skipping any that are list-like (list, tuple)
+            # to prevent the ValueError on length mismatch.
+            if not isinstance(param_val, (list, tuple)):
+                try:
+                    run_agent_data[param_key] = param_val
+                except ValueError:
+                    # As a fallback for other iterables (e.g., numpy arrays), store as a string
+                    run_agent_data[param_key] = str(param_val)
         
         # Merge model-level and agent-level data based on the 'Step'
         full_run_data = pd.merge(run_agent_data, run_model_data, on='Step')
