@@ -72,7 +72,7 @@ def main():
     # based on the (contract_type, developer_class) combination.
     results_df, _ = run(
         parameters=params,
-        iterations=config.ITERATIONS,
+        iterations=config.ITERATIONS * 10,
         number_processes=config.NUM_PROCESSES
     )
 
