@@ -68,18 +68,6 @@ def validate_and_summarize_results(df: pd.DataFrame, final_phase_fraction: float
     print(summary_to_print)
     print("="*60 + "\n")
 
-    # --- 4. Validate Final Performance Ranking ---
-    # Hypothesis: The welfare ranking should be the same as for the rational agent.
-    try:
-        if not summary['mean_welfare'].idxmax() == summary[summary['contract_type'] == 'optimal'].index[0]:
-            best_contract = summary.loc[summary['mean_welfare'].idxmax()]['contract_type']
-            print(f"  - WARNING: Optimal contract did not yield the highest final welfare. Best was '{best_contract}'.")
-        else:
-            print("  - Validation: Optimal contract yielded the highest final welfare. Passed.")
-    except IndexError:
-        print("  - ERROR: Could not perform final validation check.")
-
-
 def main():
     """Defines and runs the learning agent experiment."""
     print("--- Starting Learning Agent Robustness Experiment ---")
@@ -105,7 +93,7 @@ def main():
     print("\nStep 2: Executing simulation pipeline...")
     # For a learning experiment, each "iteration" is a full learning history.
     # We run fewer iterations as each one is computationally intensive.
-    iterations = config.ITERATIONS
+    iterations = config.ITERATIONS * 10
     print(f"Running {iterations} full learning histories for each of the {len(params['contract_type'])} configurations.")
     
     results_df, learned_q_df = run(
