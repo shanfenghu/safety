@@ -1,4 +1,4 @@
-# experiments/plot_type_gap.py
+# experiments/plot_stakes_sensitivity.py
 
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -10,17 +10,17 @@ from plot_utils import setup_plot_style
 
 def main():
     """
-    Plots the results of the type gap sensitivity analysis, including an 
-    inset plot that zooms in exclusively on the optimal contract's performance.
+    Plots the results of the environmental stakes (delta_W) sensitivity analysis,
+    including an inset to zoom in on the top-performing contracts.
     """
-    print("--- Plotting Type Gap Sensitivity Results (with Optimal-Only Inset) ---")
+    print("--- Plotting Stakes Sensitivity Results (with Inset) ---")
     setup_plot_style()
 
     # --- 1. Load Data ---
-    data_path = config.RESULTS_DIR / "type_gap_sensitivity.csv"
+    data_path = config.RESULTS_DIR / "stakes_sensitivity.csv"
     
     if not data_path.exists():
-        print(f"Error: Data file not found at '{data_path}'. Please run 'exp_type_gap.py' first.")
+        print(f"Error: Data file not found at '{data_path}'. Please run 'exp_stakes_sensitivity.py' first.")
         return
 
     df = pd.read_csv(data_path)
@@ -33,57 +33,56 @@ def main():
     
     sns.lineplot(
         data=df,
-        x='theta_H',
+        x='delta_W',
         y='SocialWelfare',
         hue='contract_type',
         style='contract_type',
-        markers=True,
+        palette=config.CONTRACT_COLORS,
+        markers=False,
         dashes=True,
         ax=ax
     )
 
-    # --- 3. Create and Customize the Inset Plot (Optimal Contract Only) ---
+    # --- 3. Create and Customize the Inset Plot ---
     
-    # Create an inset axes in the bottom left corner
+    # Create an inset axes in the bottom left
     ax_inset = inset_axes(ax, width="40%", height="40%", loc='lower left', borderpad=3)
     
-    # --- MODIFICATION: Filter data to *only* include the 'Optimal' contract ---
-    inset_df = df[df['contract_type'] == 'optimal']
+    # Filter data to exclude the 'performance' contract for the zoom
+    inset_df = df[df['contract_type'] != 'performance']
     
     # Plot the filtered data on the inset axes
     sns.lineplot(
         data=inset_df,
-        x='theta_H',
+        x='delta_W',
         y='SocialWelfare',
-        hue='contract_type', # Still use hue to get the correct color
+        hue='contract_type',
         style='contract_type',
-        palette=config.CONTRACT_COLORS,
-        markers=True,
-        dashes=False, # Use a solid line in the inset for clarity
+        markers=False,
+        dashes=True,
         ax=ax_inset,
-        legend=False # Hide the legend in the inset
+        legend=False # Hide the legend in the inset to avoid clutter
     )
     
-    # Set a tighter zoom level for the inset
-    ax_inset.set_ylim(-110, -70)
-    ax_inset.set_title('Zoom on Optimal Contract')
+    # Set the zoom level for the inset
+    ax_inset.set_title('Zoom on Top Contracts')
     ax_inset.set_xlabel('') # Remove x-label from inset
     ax_inset.set_ylabel('') # Remove y-label from inset
     ax_inset.grid(True, which='both', linestyle='--', linewidth=0.5)
     
-    # Indicate the zoomed area on the main plot
+    # Optional: Draw lines to indicate the zoomed area
     mark_inset(ax, ax_inset, loc1=2, loc2=4, fc="none", ec="0.5")
 
     # --- 4. Customize the Main Plot ---
-    ax.set_title('Contract Performance vs. Type Gap (Severity of Adverse Selection)', loc='left', fontweight='bold')
-    ax.set_xlabel('High-Quality Type Parameter ($θ_H$)')
+    ax.set_title('Contract Performance vs. Environmental Stakes (ΔW)', fontweight='bold')
+    ax.set_xlabel('Environmental Stakes (Cost of Disaster, ΔW)')
     ax.set_ylabel('Mean Social Welfare')
-    ax.legend(title='Contract Type')
+    ax.legend(title='Contract Type', loc="lower right")
     ax.grid(True, which='both', linestyle='--', linewidth=0.5)
 
     # --- 5. Finalize and Save Plot ---
     plt.tight_layout()
-    output_path = config.FIGURES_DIR / "type_gap_sensitivity.pdf"
+    output_path = config.FIGURES_DIR / "stakes_sensitivity.pdf"
     plt.savefig(output_path)
     
     print(f"\nSuccessfully saved plot to '{output_path}'")
