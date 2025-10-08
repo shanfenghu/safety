@@ -14,71 +14,84 @@ def main():
     """Defines and runs the belief misspecification experiment."""
     print("--- Starting Belief Misspecification Experiment ---")
     
-    # Set to 100 for the final, high-quality results
     iterations = config.ITERATIONS * 10
-
     nu_range = np.round(np.arange(0.1, 1.0, 0.1), 1)
+
+    # --- Step 1: Pre-calculate the true, unbiased benchmarks for each possible nu_true ---
+    print("\nStep 1: Pre-calculating true optimal benchmarks...")
+    benchmarks = {}
+    for nu_val in nu_range:
+        print(f"  - Calculating benchmark for nu_true = {nu_val}")
+        params = config.BASELINE_PARAMS.copy()
+        params['nu'] = nu_val
+        params['contract_type'] = 'optimal'
+        
+        params['developer_class'] = RationalDeveloperAgent
+        
+        # Run simulation with the truly optimal contract for this nu
+        df_benchmark, _ = run(params, iterations=iterations)
+        benchmarks[nu_val] = df_benchmark['SocialWelfare'].mean()
+    
+    print("--- Benchmarks Calculated ---")
+    print(benchmarks)
+
+    # --- Step 2: Run the main experiment grid ---
     nu_grid = list(product(nu_range, nu_range))
-    print(f"  - Testing {len(nu_grid)} combinations of (Assumed Nu, True Nu)...")
+    print(f"\nStep 2: Testing {len(nu_grid)} combinations of (Assumed Nu, True Nu)...")
 
     all_results = []
 
     for i, (nu_assumed, nu_true) in enumerate(nu_grid):
         print(f"\nRunning scenario {i+1}/{len(nu_grid)}: Assumed Nu = {nu_assumed}, True Nu = {nu_true}")
 
-        # --- A. Calculate the misspecified optimal contract ---
+        # --- A. Calculate and simulate the misspecified optimal contract ---
         params_assumed = config.BASELINE_PARAMS.copy()
         params_assumed['nu'] = nu_assumed
-        misspecified_contract_menu, optimal_efforts = calculate_optimal_contract(params_assumed)
+        misspecified_contract_menu, _ = calculate_optimal_contract(params_assumed)
         
-        misspecified_solution_vector = optimal_efforts['solver_solution']
-
-        # --- B. Run simulations with the true environment parameters ---
         params_true = config.BASELINE_PARAMS.copy()
         params_true['nu'] = nu_true
         params_true['developer_class'] = RationalDeveloperAgent
         
-        # Scenario 1: Optimal contract under misspecified beliefs
         params_optimal_misspecified = params_true.copy()
         params_optimal_misspecified['contract_type'] = 'pre_calculated_optimal'
         params_optimal_misspecified['pre_calculated_menu'] = misspecified_contract_menu
         df_optimal, _ = run(params_optimal_misspecified, iterations=iterations)
         
-        # Scenario 2: The "perfect information" benchmark for this true nu
-        params_benchmark = params_true.copy()
-        params_benchmark['contract_type'] = 'optimal'
-        params_benchmark['initial_guess'] = misspecified_solution_vector
-        
-        benchmark_contract_menu, _ = calculate_optimal_contract(params_benchmark)
-        params_benchmark_run = params_true.copy()
-        params_benchmark_run['contract_type'] = 'pre_calculated_optimal'
-        params_benchmark_run['pre_calculated_menu'] = benchmark_contract_menu
-        df_benchmark, _ = run(params_benchmark_run, iterations=iterations)
-        
-        # Scenario 3: The heuristic hybrid contract (control)
+        # --- B. Simulate the heuristic hybrid contract (control) ---
         params_hybrid = params_true.copy()
         params_hybrid['contract_type'] = 'hybrid'
         df_hybrid, _ = run(params_hybrid, iterations=iterations)
 
-        # --- C. Collect and store results for this grid cell ---
-        welfare_optimal = df_optimal['SocialWelfare'].mean()
-        welfare_benchmark = df_benchmark['SocialWelfare'].mean()
+        # --- C. Collect results ---
+        welfare_optimal_misspecified = df_optimal['SocialWelfare'].mean()
         welfare_hybrid = df_hybrid['SocialWelfare'].mean()
         
+        # Use the pre-calculated, unbiased benchmark
+        welfare_benchmark = benchmarks[nu_true]
+        
+        # On the diagonal, the loss is definitionally zero.
+        if nu_assumed == nu_true:
+            welfare_loss_optimal = 0.0
+            # We still compare the hybrid to the true benchmark
+            welfare_loss_hybrid = welfare_benchmark - welfare_hybrid
+        else:
+            welfare_loss_optimal = welfare_benchmark - welfare_optimal_misspecified
+            welfare_loss_hybrid = welfare_benchmark - welfare_hybrid
+
         all_results.append({
             'nu_assumed': nu_assumed,
             'nu_true': nu_true,
-            'welfare_optimal_misspecified': welfare_optimal,
+            'welfare_optimal_misspecified': welfare_optimal_misspecified,
             'welfare_benchmark': welfare_benchmark,
-            'welfare_hybrid': welfare_hybrid
+            'welfare_hybrid': welfare_hybrid,
+            'welfare_loss_optimal': welfare_loss_optimal,
+            'welfare_loss_hybrid': welfare_loss_hybrid
         })
 
-    # --- 3. Process and Save Final Results ---
+    # --- Step 3: Process and Save Final Results ---
     print("\nStep 3: Processing and saving final results...")
     results_df = pd.DataFrame(all_results)
-    
-    results_df['welfare_loss_optimal'] = results_df['welfare_benchmark'] - results_df['welfare_optimal_misspecified']
-    results_df['welfare_loss_hybrid'] = results_df['welfare_benchmark'] - results_df['welfare_hybrid']
     
     config.RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     output_path = config.RESULTS_DIR / "belief_misspecification.csv"
