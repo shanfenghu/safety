@@ -37,6 +37,7 @@ def main():
         y='SocialWelfare',
         hue='contract_type',
         style='contract_type',
+        palette=config.CONTRACT_COLORS,
         markers=True,
         dashes=True,
         ax=ax
