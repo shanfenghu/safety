@@ -1,7 +1,7 @@
 
-# A Multi-Task Contract Model of Environmental AI Safety
+# Contracting for Unobservable AI Safety
 
-This repository contains the source code and experimental data for the paper, "A Multi-Task Contract Model of Environmental AI Safety," submitted to AAMAS 2026.
+This repository contains the source code and experimental data for the paper, "Contracting for Unobservable AI Safety", submitted to ACM EC 2026.
 
 ## Overview
 
