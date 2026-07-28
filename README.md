@@ -1,7 +1,9 @@
 
 # Contracting for Unobservable AI Safety
 
-This repository contains the source code and experimental data for the paper, "Contracting for Unobservable AI Safety", submitted to ACM EC 2026.
+This repository contains the source code and experimental data for the paper, "Contracting for Unobservable AI Safety", accepted to ACM EC 2026.
+
+Shanfeng Hu. 2026. Contracting for Unobservable AI Safety. In The 27th ACM Conference on Economics and Computation (EC ’26), July 06–10, 2026, Rome, Italy. ACM, New York, NY, USA, 29 pages. https://doi.org/10.1145/3821539.3827683
 
 ## Overview
 
